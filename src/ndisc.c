@@ -36,36 +36,33 @@
 #include <sys/uio.h>
 #include <fcntl.h>
 
-#include "gettime.h"
-
 # include <getopt.h>
 
 #include <netdb.h> /* getaddrinfo() */
 #include <arpa/inet.h> /* inet_ntop() */
 #include <net/if.h> /* if_nametoindex() */
 
-#ifndef __linux__
-# include <net/if_dl.h> /* Link-Level sockaddr structure sockaddr_dl */
 # include <ifaddrs.h> /* getifaddrs and freeifaddrs*/
-#endif
 
 #include <netinet/in.h>
 #include <netinet/icmp6.h>
+#include <sys/ioctl.h>
+
+#include "gettime.h"
+
+enum ndisc_flags {
+    NDISC_VERBOSE1=0x1,
+    NDISC_VERBOSE2=0x2,
+    NDISC_VERBOSE3=0x3,
+    NDISC_VERBOSE =0x3,
+    NDISC_NUMERIC =0x4,
+    NDISC_SINGLE  =0x8,
+};
+
 
 #ifndef IPV6_RECVHOPLIMIT
-/* Using obsolete RFC 2292 instead of RFC 3542 */ 
+/* Using obsolete RFC 2292 instead of RFC 3542 */
 # define IPV6_RECVHOPLIMIT IPV6_HOPLIMIT
-#endif
-
-/* BSD-like systems define ND_RA_FLAG_HA instead of ND_RA_FLAG_HOME_AGENT */
-#ifndef ND_RA_FLAG_HOME_AGENT
-# ifdef ND_RA_FLAG_HA
-#  define ND_RA_FLAG_HOME_AGENT ND_RA_FLAG_HA
-# endif
-#endif
-
-#ifndef AI_IDN
-# define AI_IDN 0
 #endif
 
 /* Version number of package */
@@ -73,20 +70,6 @@
 #define VERSION "1.0.3"
 
 #define clock_nanosleep( c, f, d, r ) nanosleep( d, r )
-
-#define _( str )		gettext (str)
-#define N_( str )		gettext_noop (str)
-
-enum ndisc_flags
-{
-	NDISC_VERBOSE1=0x1,
-	NDISC_VERBOSE2=0x2,
-	NDISC_VERBOSE3=0x3,
-	NDISC_VERBOSE =0x3,
-	NDISC_NUMERIC =0x4,
-	NDISC_SINGLE  =0x8,
-};
-
 
 static int
 getipv6byname (const char *name, const char *ifname, int numeric,
@@ -99,9 +82,8 @@ getipv6byname (const char *name, const char *ifname, int numeric,
 	hints.ai_flags = numeric ? AI_NUMERICHOST : 0;
 
 	int val = getaddrinfo (name, NULL, &hints, &res);
-	if (val)
-	{
-		fprintf (stderr, _("%s: %s\n"), name, gai_strerror (val));
+	if (val) {
+		fprintf (stderr, "%s: %s\n", name, gai_strerror (val));
 		return -1;
 	}
 
@@ -109,8 +91,7 @@ getipv6byname (const char *name, const char *ifname, int numeric,
 	freeaddrinfo (res);
 
 	val = if_nametoindex (ifname);
-	if (val == 0)
-	{
+	if (val == 0) {
 		perror (ifname);
 		return -1;
 	}
@@ -137,8 +118,7 @@ setsourceip (int fd, const char *src, const char *ifname, int flags)
 	if (getipv6byname (src, ifname, (flags & NDISC_NUMERIC) ? 1 : 0, &addr))
 		return -1;
 
-	if (bind (fd, (const struct sockaddr *)&addr, sizeof (addr)))
-	{
+	if (bind (fd, (const struct sockaddr *)&addr, sizeof (addr))) {
 		perror (src);
 		return -1;
 	}
@@ -149,8 +129,7 @@ setsourceip (int fd, const char *src, const char *ifname, int flags)
 static void
 printmacaddress (const uint8_t *ptr, size_t len)
 {
-	while (len > 1)
-	{
+	while (len > 1) {
 		printf ("%02X:", *ptr);
 		ptr++;
 		len--;
@@ -160,11 +139,6 @@ printmacaddress (const uint8_t *ptr, size_t len)
 		printf ("%02X\n", *ptr);
 }
 
-
-#ifndef RDISC
-# ifdef __linux__
-#  include <sys/ioctl.h>
-# endif
 
 static int
 getmacaddress (const char *ifname, uint8_t *addr)
@@ -181,8 +155,7 @@ getmacaddress (const char *ifname, uint8_t *addr)
 	if (fd == -1)
 		return -1;
 
-	if (ioctl (fd, SIOCGIFHWADDR, &req))
-	{
+	if (ioctl (fd, SIOCGIFHWADDR, &req)) {
 		perror (ifname);
 		close (fd);
 		return -1;
@@ -216,13 +189,11 @@ getmacaddress (const char *ifname, uint8_t *addr)
 static const uint8_t nd_type_advert = ND_NEIGHBOR_ADVERT;
 static const unsigned nd_delay_ms = 1000;
 static const unsigned ndisc_default = NDISC_VERBOSE1 | NDISC_SINGLE;
-static const char ndisc_usage[] = N_(
-	"Usage: %s [options] <IPv6 address> <interface>\n"
-	"Looks up an on-link IPv6 node link-layer address (Neighbor Discovery)\n");
-static const char ndisc_dataname[] = N_("link-layer address");
+static const char ndisc_usage[] = "Usage: %s [options] <IPv6 address> <interface>\n"
+	"Looks up an on-link IPv6 node link-layer address (Neighbor Discovery)\n";
+static const char ndisc_dataname[] = "link-layer address";
 
-typedef struct
-{
+typedef struct {
 	struct nd_neighbor_solicit hdr;
 	struct nd_opt_hdr opt;
 	uint8_t hw_addr[6];
@@ -230,7 +201,7 @@ typedef struct
 
 
 static ssize_t
-buildsol (solicit_packet *ns, struct sockaddr_in6 *tgt, const char *ifname)
+build_solicitation (solicit_packet *ns, struct sockaddr_in6 *tgt, const char *ifname)
 {
 	/* builds ICMPv6 Neighbor Solicitation packet */
 	ns->hdr.nd_ns_type = ND_NEIGHBOR_SOLICIT;
@@ -246,12 +217,11 @@ buildsol (solicit_packet *ns, struct sockaddr_in6 *tgt, const char *ifname)
 	/* gets our own interface's link-layer address (MAC) */
 	if (getmacaddress (ifname, ns->hw_addr))
 		return sizeof (ns->hdr);
-	
+
 	ns->opt.nd_opt_type = ND_OPT_SOURCE_LINKADDR;
 	ns->opt.nd_opt_len = 1; /* 8 bytes */
 	return sizeof (*ns);
 }
-
 
 static int
 parseadv (const uint8_t *buf, size_t len, const struct sockaddr_in6 *tgt,
@@ -260,7 +230,7 @@ parseadv (const uint8_t *buf, size_t len, const struct sockaddr_in6 *tgt,
 	const struct nd_neighbor_advert *na =
 		(const struct nd_neighbor_advert *)buf;
 	const uint8_t *ptr;
-	
+
 	/* checks if the packet is a Neighbor Advertisement, and
 	 * if the target IPv6 address is the right one */
 	if ((len < sizeof (struct nd_neighbor_advert))
@@ -298,7 +268,7 @@ parseadv (const uint8_t *buf, size_t len, const struct sockaddr_in6 *tgt,
 		ptr += 2;
 		optlen -= 2;
 		if (verbose)
-			fputs (_("Target link-layer address: "), stdout);
+			fputs ("Target link-layer address: ", stdout);
 
 		printmacaddress (ptr, optlen);
 		return 0;
@@ -306,324 +276,6 @@ parseadv (const uint8_t *buf, size_t len, const struct sockaddr_in6 *tgt,
 
 	return -1;
 }
-#else
-static const uint8_t nd_type_advert = ND_ROUTER_ADVERT;
-static const unsigned nd_delay_ms = 4000;
-static const unsigned ndisc_default = NDISC_VERBOSE1;
-static const char ndisc_usage[] = N_(
-	"Usage: %s [options] [IPv6 address] <interface>\n"
-	"Solicits on-link IPv6 routers (Router Discovery)\n");
-static const char ndisc_dataname[] = N_("advertized prefixes");
-
-typedef struct nd_router_solicit solicit_packet;
-
-static ssize_t
-buildsol (solicit_packet *rs, struct sockaddr_in6 *tgt, const char *ifname)
-{
-	(void)tgt;
-	(void)ifname;
-
-	/* builds ICMPv6 Router Solicitation packet */
-	rs->nd_rs_type = ND_ROUTER_SOLICIT;
-	rs->nd_rs_code = 0;
-	rs->nd_rs_cksum = 0; /* computed by the kernel */
-	rs->nd_rs_reserved = 0;
-	return sizeof (*rs);
-}
-
-
-static void
-print32time (uint32_t v)
-{
-	v = ntohl (v);
-
-	if (v == 0xffffffff)
-		fputs (_("    infinite (0xffffffff)\n"), stdout);
-	else
-		printf (_("%12u (0x%08x) %s\n"),
-		        v, v, ngettext ("second", "seconds", v));
-}
-
-
-static int
-parseprefix (const struct nd_opt_prefix_info *pi, size_t optlen, bool verbose)
-{
-	char str[INET6_ADDRSTRLEN];
-
-	if (optlen < sizeof (*pi))
-		return -1;
-
-	/* displays prefix informations */
-	if (inet_ntop (AF_INET6, &pi->nd_opt_pi_prefix, str,
-	               sizeof (str)) == NULL)
-		return -1;
-
-	if (verbose)
-		fputs (_(" Prefix                   : "), stdout);
-	printf ("%s/%u\n", str, pi->nd_opt_pi_prefix_len);
-
-	if (verbose)
-	{
-		uint8_t v = pi->nd_opt_pi_flags_reserved;
-
-		printf (_("  On-link                 :          %3s\n"),
-		        gettext ((v & ND_OPT_PI_FLAG_ONLINK) ? N_ ("Yes") : N_("No")));
-		printf (_("  Autonomous address conf.:          %3s\n"),
-		        gettext ((v & ND_OPT_PI_FLAG_AUTO) ? N_ ("Yes") : N_("No")));
-
-		fputs (_("  Valid time              : "), stdout);
-		print32time (pi->nd_opt_pi_valid_time);
-		fputs (_("  Pref. time              : "), stdout);
-		print32time (pi->nd_opt_pi_preferred_time);
-	}
-	return 0;
-}
-
-
-static void
-parsemtu (const struct nd_opt_mtu *m)
-{
-	unsigned mtu = ntohl (m->nd_opt_mtu_mtu);
-
-	fputs (_(" MTU                      : "), stdout);
-	printf ("       %5u %s (%s)\n", mtu,
-	        ngettext ("byte", "bytes", mtu),
-			gettext((mtu >= 1280) ? N_("valid") : N_("invalid")));
-}
-
-
-static const char *
-pref_i2n (unsigned val)
-{
-	static const char *values[] =
-		{ N_("medium"), N_("high"), N_("medium (invalid)"), N_("low") };
-	return gettext (values[(val >> 3) & 3]);
-}
-
-
-static int
-parseroute (const uint8_t *opt)
-{
-	uint8_t optlen = opt[1], plen = opt[2];
-	if ((optlen > 3) || (plen > 128) || (optlen < ((plen + 127) >> 6)))
-		return -1;
-
-	char str[INET6_ADDRSTRLEN];
-	struct in6_addr dst = in6addr_any;
-	memcpy (dst.s6_addr, opt + 8, (optlen - 1) << 3);
-	if (inet_ntop (AF_INET6, &dst, str, sizeof (str)) == NULL)
-		return -1;
-
-	printf (_(" Route                    : %s/%"PRIu8"\n"), str, plen);
-	printf (_("  Route preference        :       %6s\n"), pref_i2n (opt[3]));
-	fputs (_("  Route lifetime          : "), stdout);
-	print32time (((const uint32_t *)opt)[1]);
-	return 0;
-}
-
-
-static int
-parserdnss (const uint8_t *opt)
-{
-	uint8_t optlen = opt[1];
-	if (((optlen & 1) == 0) || (optlen < 3))
-		return -1;
-
-	optlen /= 2;
-	for (unsigned i = 0; i < optlen; i++)
-	{
-		char str[INET6_ADDRSTRLEN];
-
-		if (inet_ntop (AF_INET6, opt + (16 * i + 8), str,
-		               sizeof (str)) == NULL)
-			return -1;
-
-		printf (_(" Recursive DNS server     : %s\n"), str);
-	}
-
-	fputs (ngettext ("  DNS server lifetime     : ",
-	                 "  DNS servers lifetime    : ", optlen), stdout);
-	print32time (((const uint32_t *)opt)[1]);
-	return 0;
-}
-
-
-static int
-parsednssl (const uint8_t *opt)
-{
-	const uint8_t *base;
-	uint8_t optlen = opt[1];
-	if (optlen < 2)
-		return -1;
-
-	printf (_(" DNS search list          : "));
-
-	optlen *= 8;
-	optlen -= 8;
-	base = opt + 8;
-
-	for (unsigned i = 0; i < optlen; i++)
-	{
-		char str[256];
-
-		if (!base[i])
-			break;
-
-		do
-		{
-			if (base[i] + i + 1 >= optlen)
-			{
-				printf("\n");
-				return -1;
-			}
-
-			memcpy (str, &base[i + 1], base[i]);
-			str[base[i]] = 0;
-
-			i += base[i] + 1;
-
-			printf ("%s%s", str, base[i] ? "." : "");
-
-		} while (base[i]);
-
-		printf (" ");
-
-	}
-
-	printf("\n");
-
-	fputs (_("  DNS search list lifetime: "), stdout);
-	print32time (((const uint32_t *)opt)[1]);
-	return 0;
-}
-
-
-static int
-parseadv (const uint8_t *buf, size_t len, const struct sockaddr_in6 *tgt,
-          bool verbose)
-{
-	const struct nd_router_advert *ra =
-		(const struct nd_router_advert *)buf;
-	const uint8_t *ptr;
-
-	(void)tgt;
-
-	/* checks if the packet is a Router Advertisement */
-	if ((len < sizeof (struct nd_router_advert))
-	 || (ra->nd_ra_type != ND_ROUTER_ADVERT)
-	 || (ra->nd_ra_code != 0))
-		return -1;
-
-	if (verbose)
-	{
-		unsigned v;
-
-		/* Hop limit */
-		puts ("");
-		fputs (_("Hop limit                 :    "), stdout);
-		v = ra->nd_ra_curhoplimit;
-		if (v != 0)
-			printf (_("      %3u"), v);
-		else
-			fputs (_("undefined"), stdout);
-		printf (_(" (      0x%02x)\n"), v);
-
-		v = ra->nd_ra_flags_reserved;
-		printf (_("Stateful address conf.    :          %3s\n"),
-		        gettext ((v & ND_RA_FLAG_MANAGED) ? N_ ("Yes") : N_("No")));
-		printf (_("Stateful other conf.      :          %3s\n"),
-		        gettext ((v & ND_RA_FLAG_OTHER) ? N_ ("Yes") : N_("No")));
-		printf (_("Mobile home agent         :          %3s\n"),
-		        gettext ((v & ND_RA_FLAG_HOME_AGENT) ? N_ ("Yes") : N_("No")));
-		printf (_("Router preference         :       %6s\n"), pref_i2n (v));
-		printf (_("Neighbor discovery proxy  :          %3s\n"),
-		        gettext ((v & 0x04) ? N_ ("Yes") : N_("No")));
-
-		/* Router lifetime */
-		fputs (_("Router lifetime           : "), stdout);
-		v = ntohs (ra->nd_ra_router_lifetime);
-		printf (_("%12u (0x%08x) %s\n"), v, v,
-		        ngettext ("second", "seconds", v));
-
-		/* ND Reachable time */
-		fputs (_("Reachable time            : "), stdout);
-		v = ntohl (ra->nd_ra_reachable);
-		if (v != 0)
-			printf (_("%12u (0x%08x) %s\n"), v, v,
-			        ngettext ("millisecond", "milliseconds", v));
-		else
-			fputs (_(" unspecified (0x00000000)\n"), stdout);
-
-		/* ND Retransmit time */
-		fputs (_("Retransmit time           : "), stdout);
-		v = ntohl (ra->nd_ra_retransmit);
-		if (v != 0)
-			printf (_("%12u (0x%08x) %s\n"), v, v,
-			        ngettext ("millisecond", "milliseconds", v));
-		else
-			fputs (_(" unspecified (0x00000000)\n"), stdout);
-	}
-	len -= sizeof (struct nd_router_advert);
-
-	/* parses options */
-	ptr = buf + sizeof (struct nd_router_advert);
-
-	while (len >= 8)
-	{
-		uint16_t optlen;
-
-		optlen = ((uint16_t)(ptr[1])) << 3;
-		if ((optlen == 0) /* invalid length */
-		 || (len < optlen) /* length > remaining bytes */)
-			break;
-
-		len -= optlen;
-
-		/* only prefix are shown if not verbose */
-		switch (ptr[0] * (verbose ? 1
-		                          : (ptr[0] == ND_OPT_PREFIX_INFORMATION)))
-		{
-			case ND_OPT_SOURCE_LINKADDR:
-				fputs (_(" Source link-layer address: "), stdout);
-				printmacaddress (ptr + 2, optlen - 2);
-				break;
-
-			case ND_OPT_TARGET_LINKADDR:
-				break; /* ignore */
-
-			case ND_OPT_PREFIX_INFORMATION:
-				if (parseprefix ((const struct nd_opt_prefix_info *)ptr,
-				                 optlen, verbose))
-					return -1;
-
-			case ND_OPT_REDIRECTED_HEADER:
-				break; /* ignore */
-
-			case ND_OPT_MTU:
-				parsemtu ((const struct nd_opt_mtu *)ptr);
-				break;
-
-			case 24: // RFC4191
-				parseroute (ptr);
-				break;
-
-			case 25: // RFC5006
-				parserdnss (ptr);
-				break;
-
-			case 31: // RFC6106
-				parsednssl (ptr);
-				break;
-		}
-		/* skips unrecognized option */
-
-		ptr += optlen;
-	}
-
-	return 0;
-}
-#endif
-
 
 static ssize_t
 recvfromLL (int fd, void *buf, size_t len, int flags,
@@ -681,7 +333,7 @@ recvadv (int fd, const struct sockaddr_in6 *tgt, unsigned wait_ms,
 	mono_gettime (&end);
 	{
 		div_t d;
-		
+
 		d = div (wait_ms, 1000);
 		end.tv_sec += d.quot;
 		end.tv_nsec += d.rem * 1000000;
@@ -723,7 +375,7 @@ recvadv (int fd, const struct sockaddr_in6 *tgt, unsigned wait_ms,
 		if (val == -1)
 		{
 			if (errno != EAGAIN)
-				perror (_("Receiving ICMPv6 packet"));
+				perror ("Receiving ICMPv6 packet");
 			continue;
 		}
 
@@ -740,7 +392,7 @@ recvadv (int fd, const struct sockaddr_in6 *tgt, unsigned wait_ms,
 
 				if (inet_ntop (AF_INET6, &addr.sin6_addr, str,
 						sizeof (str)) != NULL)
-					printf (_(" from %s\n"), str);
+					printf (" from %s\n", str);
 			}
 
 			if (responses < INT_MAX)
@@ -763,9 +415,8 @@ ndisc (const char *name, const char *ifname, unsigned flags, unsigned retry,
 {
 	struct sockaddr_in6 tgt;
 
-	if (fd == -1)
-	{
-		perror (_("Raw IPv6 socket"));
+	if (fd == -1) {
+		perror ("Raw IPv6 socket");
 		return -1;
 	}
 
@@ -794,13 +445,12 @@ ndisc (const char *name, const char *ifname, unsigned flags, unsigned retry,
 	/* resolves target's IPv6 address */
 	if (getipv6byname (name, ifname, (flags & NDISC_NUMERIC) ? 1 : 0, &tgt))
 		goto error;
-	else
-	{
+	else {
 		char s[INET6_ADDRSTRLEN];
 
 		inet_ntop (AF_INET6, &tgt.sin6_addr, s, sizeof (s));
 		if (flags & NDISC_VERBOSE)
-			printf (_("Soliciting %s (%s) on %s...\n"), name, s, ifname);
+			printf ("Soliciting %s (%s) on %s...\n", name, s, ifname);
 	}
 
 	{
@@ -809,34 +459,28 @@ ndisc (const char *name, const char *ifname, unsigned flags, unsigned retry,
 		ssize_t plen;
 
 		memcpy (&dst, &tgt, sizeof (dst));
-		plen = buildsol (&packet, &dst, ifname);
+		plen = build_solicitation (&packet, &dst, ifname);
 		if (plen == -1)
 			goto error;
 
-		while (retry > 0)
-		{
+		while (retry > 0) {
 			/* sends a Solitication */
-			if (sendto (fd, &packet, plen, 0,
-			            (const struct sockaddr *)&dst,
-			            sizeof (dst)) != plen)
-			{
-				perror (_("Sending ICMPv6 packet"));
+			if (sendto (fd, &packet, plen, 0, (const struct sockaddr *)&dst,
+			            sizeof (dst)) != plen) {
+				perror ("Sending ICMPv6 packet");
 				goto error;
 			}
 			retry--;
-	
+
 			/* receives an Advertisement */
 			ssize_t val = recvadv (fd, &tgt, wait_ms, flags);
-			if (val > 0)
-			{
+			if (val > 0) {
 				close (fd);
 				return 0;
 			}
-			else
-			if (val == 0)
-			{
+			else if (val == 0) {
 				if (flags & NDISC_VERBOSE)
-					puts (_("Timed out."));
+					puts ("Timed out.");
 			}
 			else
 				goto error;
@@ -845,7 +489,7 @@ ndisc (const char *name, const char *ifname, unsigned flags, unsigned retry,
 
 	close (fd);
 	if (flags & NDISC_VERBOSE)
-		puts (_("No response."));
+		puts ("No response.");
 	return -2;
 
 error:
@@ -857,7 +501,7 @@ error:
 static int
 quick_usage (const char *path)
 {
-	fprintf (stderr, _("Try \"%s -h\" for more information.\n"), path);
+	fprintf (stderr, "Try \"%s -h\" for more information.\n", path);
 	return 2;
 }
 
@@ -867,35 +511,34 @@ usage (const char *path)
 {
 	printf (gettext (ndisc_usage), path);
 
-	printf (_("\n"
-"  -1, --single   display first response and exit\n"
-"  -h, --help     display this help and exit\n"
-"  -m, --multiple wait and display all responses\n"
-"  -n, --numeric  don't resolve host names\n"
-"  -q, --quiet    only print the %s (mainly for scripts)\n"
-"  -r, --retry    maximum number of attempts (default: 3)\n"
-"  -s, --source   specify source IPv6 address\n"
-"  -V, --version  display program version and exit\n"
-"  -v, --verbose  verbose display (this is the default)\n"
-"  -w, --wait     how long to wait for a response [ms] (default: 1000)\n"
-	           "\n"), gettext (ndisc_dataname));
+    printf ("\n"
+                "  -1, --single   display first response and exit\n"
+                "  -h, --help     display this help and exit\n"
+                "  -m, --multiple wait and display all responses\n"
+                "  -n, --numeric  don't resolve host names\n"
+                "  -q, --quiet    only print the %s (mainly for scripts)\n"
+                "  -r, --retry    maximum number of attempts (default: 3)\n"
+                "  -s, --source   specify source IPv6 address\n"
+                "  -V, --version  display program version and exit\n"
+                "  -v, --verbose  verbose display (this is the default)\n"
+                "  -w, --wait     how long to wait for a response [ms] (default: 1000)\n"
+                "\n", gettext (ndisc_dataname));
 
-	return 0;
+    return 0;
 }
-
 
 static int
 version (void)
 {
-	printf (_(
-"ndisc6: IPv6 Neighbor/Router Discovery userland tool %s (%s)\n"), VERSION, "$Rev$");
+	printf (
+"ndisc6: IPv6 Neighbor/Router Discovery userland tool %s (%s)\n", VERSION, "$Rev$");
 
-	puts (_("Written by Remi Denis-Courmont\n"));
+	puts ("Written by Remi Denis-Courmont\n");
 
-	printf (_("Copyright (C) %u-%u Remi Denis-Courmont\n"), 2004, 2007);
-	puts (_("This is free software; see the source for copying conditions.\n"
+	printf ("Copyright (C) %u-%u Remi Denis-Courmont\n", 2004, 2007);
+	puts ("This is free software; see the source for copying conditions.\n"
 	        "There is NO warranty; not even for MERCHANTABILITY or\n"
-	        "FITNESS FOR A PARTICULAR PURPOSE.\n"));
+	        "FITNESS FOR A PARTICULAR PURPOSE.\n");
 	return 0;
 }
 
@@ -911,7 +554,6 @@ main (int argc, char *argv[])
 		return 1;
 
 	setlocale (LC_ALL, "");
-	//bindtextdomain (PACKAGE, LOCALEDIR);
 	bindtextdomain (PACKAGE, "/usr/local/share/locale/");
 	textdomain (PACKAGE);
 
@@ -919,31 +561,23 @@ main (int argc, char *argv[])
 	unsigned retry = 3, flags = ndisc_default, wait_ms = nd_delay_ms;
 	const char *hostname, *ifname, *source = NULL;
 
-	while ((val = getopt(argc, argv, "1hmnqr:s:Vvw:")) != EOF)
-	{
-		switch (val)
-		{
+	while ((val = getopt(argc, argv, "1hmnqr:s:Vvw:")) != EOF) {
+		switch (val) {
 			case '1':
 				flags |= NDISC_SINGLE;
 				break;
-
 			case 'h':
 				return usage (argv[0]);
-
 			case 'm':
 				flags &= ~NDISC_SINGLE;
 				break;
-
 			case 'n':
 				flags |= NDISC_NUMERIC;
 				break;
-
 			case 'q':
 				flags &= ~NDISC_VERBOSE;
 				break;
-
-			case 'r':
-			{
+			case 'r': {
 				unsigned long l;
 				char *end;
 
@@ -953,22 +587,17 @@ main (int argc, char *argv[])
 				retry = l;
 				break;
 			}
-
 			case 's':
 				source = optarg;
 				break;
-				
 			case 'V':
 				return version ();
-
 			case 'v':
 				/* NOTE: assume NDISC_VERBOSE occupies low-order bits */
 				if ((flags & NDISC_VERBOSE) < NDISC_VERBOSE)
 					flags++;
 				break;
-
-			case 'w':
-			{
+			case 'w': {
 				unsigned long l;
 				char *end;
 
@@ -978,15 +607,13 @@ main (int argc, char *argv[])
 				wait_ms = l;
 				break;
 			}
-
 			case '?':
 			default:
 				return quick_usage (argv[0]);
 		}
 	}
 
-	if (optind < argc)
-	{
+	if (optind < argc) {
 		hostname = argv[optind++];
 
 		if (optind < argc)
@@ -997,18 +624,9 @@ main (int argc, char *argv[])
 	else
 		return quick_usage (argv[0]);
 
-#ifdef RDISC
-	if (ifname == NULL)
-	{
-		ifname = hostname;
-		hostname = "ff02::2";
-	}
-	else
-#endif
 	if ((optind != argc) || (ifname == NULL))
 		return quick_usage (argv[0]);
 
 	errno = errval; /* restore socket() error value */
 	return -ndisc (hostname, ifname, flags, retry, wait_ms, source);
 }
-
