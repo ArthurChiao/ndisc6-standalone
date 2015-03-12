@@ -18,8 +18,6 @@
  *  along with this program. If not, see <http://www.gnu.org/licenses/>. *
  *************************************************************************/
 
-#include "gettext.h"
-
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h> /* div() */
@@ -70,6 +68,14 @@ enum ndisc_flags {
 #define VERSION "1.0.3"
 
 #define clock_nanosleep( c, f, d, r ) nanosleep( d, r )
+
+struct SolicitPacket{
+	struct nd_neighbor_solicit hdr;
+	struct nd_opt_hdr opt;
+	uint8_t hw_addr[6];
+};
+
+static int fd;
 
 static int
 get_ipv6_byname(const char *name, const char *ifname, int numeric,
@@ -129,7 +135,6 @@ set_source_ip(int fd, const char *src, const char *ifname, int flags)
 	return 0;
 }
 
-
 static void
 print_mac_address(const uint8_t *ptr, size_t len)
 {
@@ -142,7 +147,6 @@ print_mac_address(const uint8_t *ptr, size_t len)
 	if (len == 1)
 		printf("%02X\n", *ptr);
 }
-
 
 static int
 get_mac_address(const char *ifname, uint8_t *addr)
@@ -188,19 +192,6 @@ get_mac_address(const char *ifname, uint8_t *addr)
 	return -1;
 # endif
 }
-
-
-static const char ndisc_usage[] =
-"Usage: %s [options] <IPv6 address> <interface>\n"
-"Looks up an on-link IPv6 node link-layer address (Neighbor Discovery)\n";
-static const char ndisc_dataname[] = "link-layer address";
-
-struct SolicitPacket{
-	struct nd_neighbor_solicit hdr;
-	struct nd_opt_hdr opt;
-	uint8_t hw_addr[6];
-};
-
 
 static ssize_t
 build_solicit(struct SolicitPacket *packet,
@@ -316,7 +307,6 @@ receive_packet(int fd, void *buf, size_t len, int flags,
 	return val;
 }
 
-
 static ssize_t
 receive_advert(int fd, const struct sockaddr_in6 *dstip, unsigned wait_ms,
          unsigned flags)
@@ -394,9 +384,6 @@ receive_advert(int fd, const struct sockaddr_in6 *dstip, unsigned wait_ms,
 
 	return -1; /* error */
 }
-
-
-static int fd;
 
 static int
 ndisc(const char *name, const char *ifname, unsigned flags, unsigned retry,
@@ -486,7 +473,6 @@ error:
 	return -1;
 }
 
-
 static int
 quick_usage(const char *path)
 {
@@ -497,7 +483,8 @@ quick_usage(const char *path)
 static int
 usage(const char *path)
 {
-	printf(gettext (ndisc_usage), path);
+    printf( "Usage: %s [options] <IPv6 address> <interface>\n"
+            "Looks up an on-link IPv6 node link-layer address (Neighbor Discovery)\n");
 
     printf("\n");
     printf( "  -1, --single   display first response and exit\n"
@@ -509,8 +496,7 @@ usage(const char *path)
             "  -s, --source   specify source IPv6 address\n"
             "  -V, --version  display program version and exit\n"
             "  -v, --verbose  verbose display (this is the default)\n"
-            "  -w, --wait     how long to wait for a response [ms] (default: 1000)\n"
-            "\n", gettext(ndisc_dataname));
+            "  -w, --wait     how long to wait for a response [ms] (default: 1000)\n");
 
     return 0;
 }
